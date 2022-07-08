@@ -2,10 +2,15 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Task;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Validation\Rule;
 
+use App\Models\Task;
 use App\Http\Resources\TaskResource;
+
+use Validator;
+
 
 class TaskController extends Controller
 {
@@ -25,7 +30,7 @@ class TaskController extends Controller
      *
      * @return \Illuminate\Http\Response
      */
-    public function create()
+    public function create(Request $request)
     {
         //
     }
@@ -36,9 +41,32 @@ class TaskController extends Controller
      * @param  \Illuminate\Http\Request  $request
      * @return \Illuminate\Http\Response
      */
+
     public function store(Request $request)
     {
-        //
+        // Get validation rules from task model
+        $rules = Task::getValidationRulesForCreation();
+
+        // Validate data and return error if any
+        $data = $request->all();
+
+        $validation = Validator::make($data, $rules);
+        
+        if($validation->stopOnFirstFailure()->fails()){
+            return $this->send_response(
+                message:'Validation Error',
+                status_code:401,
+                errors:[$validation->errors()],
+            );
+        }
+
+        // Create new open task and return id
+        $data += ['task_state' => 'open'];
+        $data += ['deleted' => false];
+        $task = Task::create($data);
+        $task = new TaskResource($task);
+
+        return $this->send_response(status_code:201, data: ['id' => $task->id] );
     }
 
     /**
@@ -49,7 +77,7 @@ class TaskController extends Controller
      */
     public function show(Task $task)
     {
-        //
+        return $this->send_response(data: new TaskResource($task));
     }
 
     /**
@@ -72,7 +100,22 @@ class TaskController extends Controller
      */
     public function update(Request $request, Task $task)
     {
-        //
+        $data = $request->all();
+
+        $rules = Task::getValidationRulesForUpdate();
+        
+        $validation = Validator::make($data, $rules);
+
+        if($validation->stopOnFirstFailure()->fails()){
+            return $this->send_response(
+                status_code:400, 
+                message: 'Validation Error', 
+                errors: [$validation->errors()]
+            );
+        }
+        $task->update($request->all());
+
+        return $this->send_response(status_code:202);
     }
 
     /**
@@ -83,6 +126,20 @@ class TaskController extends Controller
      */
     public function destroy(Task $task)
     {
-        //
+        function dfs($task){
+            if($task->deleted){
+                return;
+            }
+            $id = $task->id;
+            $task->deleted = true;
+            $task->save();
+            $tasks = Task::where('parent_task_id', '=', $id)->get();
+            foreach($tasks as $task){
+                dfs($task);
+            }
+        }
+
+        dfs($task);
+        return $this->send_response();
     }
 }
